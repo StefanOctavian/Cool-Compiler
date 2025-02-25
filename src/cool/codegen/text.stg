@@ -1,0 +1,275 @@
+code(classes) ::= <<
+.text
+    .globl Int_init
+    .globl String_init
+    .globl Bool_init
+    .globl Main_init
+    .globl Main.main
+$["Object", "IO", "Int", "String", "Bool"]:emptyInit(); separator="\n"$
+$classes; separator="\n"$
+>>
+
+class(name, parent, emptyInit, attrInits, tempsize, methods) ::= <<
+$if(emptyInit)$$emptyInit(name)$$else$$init(name, parent, attrInits, tempsize)$$endif$$if(methods)$
+$methods; separator="\n"$$endif$
+>>
+
+emptyInit(name) ::= <<
+$name$_init:
+    jr \$ra
+>>
+
+init(name, parent, attrsInits, tempsize) ::= <<
+$name$_init:
+$!!$$prologue(tempsize)$
+$!!$$if(parent)$    jal $parent$_init $endif$
+$!!$$attrsInits; separator="\n"$
+$!!$$epilogue("12", tempsize, "true")$
+>>
+
+prologue(tempsize) ::= <<
+    addiu \$sp \$sp -12
+    sw \$fp 12(\$sp)
+    sw \$s0 8(\$sp)
+    sw \$ra 4(\$sp)
+    addiu \$fp \$sp 4
+    move \$s0 \$a0$if(tempsize)$
+    addiu \$sp \$sp -$tempsize$$endif$      # local variables
+>>
+
+epilogue(headersize, tempsize, isInit) ::= <<$if(tempsize)$
+    addiu \$sp \$sp $tempsize$ $\n$$endif$$if(isInit)$
+    move \$a0 \$s0 $\n$$endif$
+    lw \$fp 12(\$sp)
+    lw \$s0 8(\$sp)
+    lw \$ra 4(\$sp)
+    addiu \$sp \$sp $headersize$
+    jr \$ra
+>>
+
+method(name, body, tempsize, headersize) ::= <<
+$name$:
+$!!$$prologue(tempsize)$
+$!!$$body$
+$!!$$epilogue(headersize, tempsize, [])$
+>>
+
+block(exprs_code) ::= <<
+$exprs_code; separator="\n"$
+>>
+
+attrStore(loc) ::= <<$loc$(\$s0)>>
+localStore(loc) ::= <<-$loc$(\$fp)>>
+argStore(loc) ::= <<$loc$(\$fp)>>
+
+read(store, loc) ::= <<
+    lw \$a0 $(store)(loc)$
+>>
+readSelf() ::= <<
+    move \$a0 \$s0
+>>
+
+assign(e_code, store, loc) ::= <<
+$!!$$e_code$
+    sw \$a0 $(store)(loc)$
+>>
+
+pushArg(arg_code, loc) ::= <<
+$!!$$arg_code$
+    sw \$a0 $loc$(\$sp)
+>>
+
+pushArgs(argssize, args_code) ::= <<
+    addiu \$sp \$sp -$argssize$      # make room for arguments
+$!!$$args_code; separator="\n"$$\n$
+>>
+
+dispatch_core(methodOffset, staticClass) ::= <<$if(staticClass)$
+    la \$t1 $staticClass$_dispTab$\n$$else$
+    lw \$t1 8(\$a0)        # dispatch table$\n$$endif$
+    lw \$t1 $methodOffset$(\$t1)        # method offset
+    jalr \$t1
+>> 
+
+dispatch(staticClass, obj_code, methodOffset, argssize, args_code, 
+         dispIndex, fileNameLabel, lineNo) ::= <<$if(argssize)$$!
+  !$$pushArgs(argssize, args_code)$$endif$
+$!!$$obj_code$
+    bnez \$a0 dispatch$dispIndex$
+    la \$a0 str_const$fileNameLabel$    # filename
+    li \$t1 $lineNo$
+    jal _dispatch_abort
+dispatch$dispIndex$:
+$!!$$dispatch_core(methodOffset, staticClass)$
+>>
+
+dispatchSelf(methodOffset, argssize, args_code) ::= <<$if(argssize)$$!
+  !$$pushArgs(argssize, args_code)$$endif$
+    move \$a0 \$s0
+$!!$$dispatch_core(methodOffset, [])$
+>>
+
+initLocal(loc, value) ::= <<
+    sw $value$ -$loc$(\$fp)
+>>
+
+let(bindings_code, body_code) ::= <<
+$!!$$bindings_code; separator="\n"$
+$!!$$body_code$
+>>
+
+new(className) ::= <<
+    la \$a0 $className$_protObj
+    jal Object.copy
+    jal $className$_init
+>>
+
+newSelfType(temp) ::= <<
+    la \$t1 class_objTab
+    lw \$t2 0(\$s0)         # class tag
+    sll \$t2 \$t2 3         # class tag * 8
+    add \$t1 \$t1 \$t2      # \$t1 = class_objTab + class tag * 8
+    sw \$t1 -$temp$(\$fp)   # save \$t1 at temp
+    lw \$a0 0(\$t1)         # \$a0 = class _protObj
+    jal Object.copy
+    lw \$t1 -$temp$(\$fp)   # restore \$t1
+    lw \$t1 4(\$t1)         # \$t1 = class _init
+    jalr \$t1
+>>
+
+if(cond_code, then_code, else_code, branchIndex) ::= <<
+$!!$$cond_code$
+    lw \$t1 12(\$a0)
+    beqz \$t1 else$branchIndex$
+$!!$$then_code$
+    b endif$branchIndex$
+else$branchIndex$:
+$!!$$else_code$
+endif$branchIndex$:
+>>
+
+isvoid(e_code, branchIndex) ::= <<
+$!!$$e_code$
+    beqz \$a0 isvoid$branchIndex$
+    la \$a0 bool_const0
+    b endisvoid$branchIndex$
+isvoid$branchIndex$:
+    la \$a0 bool_const1
+endisvoid$branchIndex$:
+>>
+
+not(e_code, branchIndex) ::= <<
+$!!$$e_code$
+    lw \$a0 12(\$a0)
+    beqz \$a0 not$branchIndex$
+    la \$a0 bool_const0
+    b endnot$branchIndex$
+not$branchIndex$:
+    la \$a0 bool_const1
+endnot$branchIndex$:
+>>
+
+neg(e_code) ::= <<
+$!!$$e_code$
+    jal Object.copy
+    lw \$t1 12(\$a0)        # read integer value
+    sub \$t1 \$zero \$t1
+    sw \$t1 12(\$a0)        # store result
+>>
+
+add() ::= <<add \$t1 \$t1 \$t2>>
+sub() ::= <<sub \$t1 \$t1 \$t2>>
+mul() ::= <<mul \$t1 \$t1 \$t2>>
+div() ::= <<$!
+  !$div \$t1 \$t2
+$!!$mflo \$t1$!
+!$>>
+
+arithop(e1_code, e2_code, op, temp) ::= <<
+$!!$$e1_code$
+    sw \$a0 -$temp$(\$fp)
+$!!$$e2_code$
+    jal Object.copy
+    lw \$t1 -$temp$(\$fp)
+    lw \$t1 12(\$t1)        # read integer value
+    lw \$t2 12(\$a0)        # read integer value
+    $(op)()$
+    sw \$t1 12(\$a0)        # store result
+>>
+
+equal(e1_code, e2_code, temp, branchIndex) ::= <<
+$!!$$e1_code$
+    sw \$a0 -$temp$(\$fp)
+$!!$$e2_code$
+    move \$t2 \$a0
+    lw \$t1 -$temp$(\$fp)
+    la \$a0 bool_const1
+    beq \$t1 \$t2 equal$branchIndex$
+    la \$a1 bool_const0
+    jal equality_test
+equal$branchIndex$:
+>>
+
+lt() ::= <<blt>>
+leq() ::= <<ble>>
+
+comp(e1_code, e2_code, rel, temp, branchIndex) ::= <<
+$!!$$e1_code$
+    sw \$a0 -$temp$(\$fp)
+$!!$$e2_code$
+    lw \$t1 -$temp$(\$fp)
+    lw \$t1 12(\$t1)    # read integer value
+    lw \$t2 12(\$a0)    # read integer value
+    $(rel)()$ \$t1 \$t2 $rel$$branchIndex$
+    la \$a0 bool_const0
+    b end$rel$$branchIndex$
+$rel$$branchIndex$:
+    la \$a0 bool_const1
+end$rel$$branchIndex$:
+>>
+
+while(cond_code, body_code, branchIndex) ::= <<
+while$branchIndex$:
+$!!$$cond_code$
+    lw \$t1 12(\$a0)
+    beqz \$t1 endwhile$branchIndex$
+$!!$$body_code$
+    j while$branchIndex$
+endwhile$branchIndex$:
+    li \$a0 0
+>>
+
+case(obj_code, cases_code, temp, caseIndex, fileNameLabel, lineNo) ::= <<
+$!!$$obj_code$
+    bnez \$a0 case$caseIndex$
+    la \$a0 str_const$fileNameLabel$    # filename
+    li \$t1 $lineNo$
+    jal _case_abort2
+case$caseIndex$:
+    sw \$a0 -$temp$(\$fp)
+    lw \$t1 0(\$a0)        # class tag
+$cases_code; separator="\n"$
+endcase$caseIndex$:
+>>
+
+caseBranch(inftag, suptag, case_code, caseIndex, i0, i1) ::= <<
+case$caseIndex$_$i0$:
+    blt \$t1 $inftag$ case$caseIndex$_$i1$
+    bgt \$t1 $suptag$ case$caseIndex$_$i1$
+$!!$$case_code$
+    b endcase$caseIndex$
+>>
+
+noCaseBranch(objtemp, caseIndex, i0) ::= <<
+case$caseIndex$_$i0$:
+    lw \$a0 -$objtemp$(\$fp)
+    jal _case_abort
+>>
+
+literal(value) ::= <<
+    la \$a0 $value$
+>>
+
+void() ::= <<
+    li \$a0 0
+>>

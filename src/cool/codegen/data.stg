@@ -1,0 +1,92 @@
+data(intTag, stringTag, boolTag, intConsts, stringConsts, classes) ::= <<
+.data
+    .align 2
+$!!$$globals()$
+_int_tag: 
+    .word $intTag$
+_string_tag:
+    .word $stringTag$
+_bool_tag:
+    .word $boolTag$
+$intConsts:{intObj|$intConst(i0, intObj)$}; separator="\n"$
+$stringConsts:{stringObj|$stringConst(i0, stringObj)$}; separator="\n"$
+$boolConsts(boolTag)$
+class_nameTab:
+$!!$$classes:classNameInTable(); separator="\n"$
+class_objTab:
+$!!$$classes:classInObjTab(); separator="\n"$
+$classes:protObj(); separator="\n"$
+$classes:dispTab(); separator="\n"$
+heap_start:
+    .word 0
+>>
+
+globals() ::= <<
+    .globl class_nameTab
+    .globl Int_protObj
+    .globl String_protObj
+    .globl Main_protObj
+    .globl bool_const0
+    .globl bool_const1
+    .globl _int_tag
+    .globl _string_tag
+    .globl _bool_tag
+    .globl heap_start
+>>
+
+intConst(i0, intObj) ::= <<
+int_const$i0$:
+$!!$$object(intObj)$
+>>
+
+stringConst(i0, stringObj) ::= <<
+str_const$i0$:
+$!!$$stringObject(stringObj)$
+>>
+
+boolConsts(boolTag) ::= <<
+bool_const0:
+    .word $boolTag$
+    .word 4
+    .word Bool_dispTab
+    .word 0
+bool_const1:
+    .word $boolTag$
+    .word 4
+    .word Bool_dispTab
+    .word 1
+>>
+
+classNameInTable(class) ::= <<
+    .word str_const$class.nameLabel$
+>>
+
+classInObjTab(class) ::= <<
+    .word $class.name$_protObj
+    .word $class.name$_init
+>>
+
+stringObject(obj) ::= <<
+$!!$$object(obj)$
+    .asciiz "$obj.value$"
+    .align 2
+>>
+
+object(obj) ::= <<
+    .word $obj.tag$
+    .word $obj.memsize$
+    .word $obj.dispatchTable$ $if(obj.attrs)$ $\n$    $endif$$!
+  !$$obj.attrs:word(); separator="\n    "$
+>>
+
+word(value) ::= <<.word $value$>>
+
+protObj(class) ::= <<
+$class.name$_protObj:
+$!!$$(class.protObj.template)(class.protObj)$
+>>
+
+dispTab(class) ::= <<
+$class.name$_dispTab:
+    $class.dispTab:word(); separator="\n"$
+>>
